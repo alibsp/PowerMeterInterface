@@ -34,6 +34,8 @@ class TCPClient : public QObject
     Q_OBJECT
     QThread workerThread;
     Q_PROPERTY(QAbstractSocket::SocketState state READ state())
+    Q_PROPERTY(QHostAddress hostAddress READ hostAddress WRITE setHostAddress NOTIFY hostAddressChanged)
+    Q_PROPERTY(quint16 port READ port WRITE setPort NOTIFY portChanged)
 
     QAbstractSocket::SocketState m_state = QAbstractSocket::UnconnectedState;
     QHostAddress m_hostAddress;
@@ -49,6 +51,11 @@ public:
     QAbstractSocket::SocketState state() const;
     QHostAddress hostAddress(){return m_hostAddress;}
     quint16 port(){return m_port;}
+
+public slots:
+    void setHostAddress(QHostAddress hostAddress);
+
+    void setPort(quint16 port);
 
 private slots:
     void setState(QAbstractSocket::SocketState socketState);
@@ -68,6 +75,8 @@ signals:
     void initWorker();
     quint64 sendData(const QByteArray &data);
     void eventLog(const QString &log);
+    void hostAddressChanged(QHostAddress hostAddress);
+    void portChanged(quint16 port);
 };
 
 

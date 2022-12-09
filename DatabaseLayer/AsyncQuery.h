@@ -58,7 +58,7 @@ public:
 		Mode_Fifo,
 		/** Same as Mode_Fifo, but if a previous startExec call is not executed
 		 * yet it is skipped and overwritten by the current query. E.g. if a
-		 * graphical slider is bound to a sql query heavy database access can be
+		 * graphical QSlider *sldInterval is bound to a sql query heavy database access can be
 		 * ommited by using this mode.
 		 */
 		Mode_SkipPrevious,

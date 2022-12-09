@@ -2,6 +2,7 @@
 #define MAINWINDOW_H
 
 #include <QMainWindow>
+#include <QSlider>
 #include <DeviceLayer/DevicesCommunicationService.h>
 
 QT_BEGIN_NAMESPACE
@@ -18,10 +19,17 @@ public:
 
 private:
     Ui::MainWindow *ui;
+    QSlider *sldInterval;
     DevicesCommunicationService *deviceService = nullptr;
 
 public slots:
     void onEventLog(QString log);
+
+private slots:
+    void on_chbCommand_stateChanged(int arg1);
+    void on_chbPMRead_stateChanged(int arg1);
+    void on_chbPooling_stateChanged(int arg1);
+    void on_sldInterval_valueChanged(int value);
 
 };
 #endif // MAINWINDOW_H

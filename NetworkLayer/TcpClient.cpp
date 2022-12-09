@@ -13,7 +13,7 @@ void TCPClientWorker::init()
     connect(this, &QTcpSocket::readyRead, this, &TCPClientWorker::readyReadSlot);
 
     m_timer = new QTimer(this);
-    m_timer->setInterval(100);
+    m_timer->setInterval(1000);
     connect(m_timer, &QTimer::timeout, this, &TCPClientWorker::tryConnect);
 }
 
@@ -24,9 +24,13 @@ void TCPClientWorker::tryConnect()
     QString log;
     QTextStream in(&log);
 
-    if(m_port!=0 && state() == QTcpSocket::UnconnectedState)
+
+    //emit eventLog(log);
+    //if(m_port!=0 && state() == QTcpSocket::UnconnectedState)
+    if(m_port!=0 && state() != QTcpSocket::ConnectedState)
     {
-        in<<"Try to Connect "<<m_hostAddress.toString()<<":"<<m_port;//<<". state:"<<Tools::enumToString(state());
+        //in<<"Try to Connect "<<m_hostAddress.toString()<<":"<<m_port;//<<". state:"<<Tools::enumToString(state());
+        in<<Tools::jalaliNow()<<", Try to connect "<<m_hostAddress.toString()<<":"<<m_port<<". state:"<<Tools::enumToString(state());
         emit eventLog(log);
         connectToHost(m_hostAddress, m_port);
     }
@@ -96,6 +100,24 @@ TCPClient::TCPClient(QObject *parent)
 QAbstractSocket::SocketState TCPClient::state() const
 {
     return m_state;
+}
+
+void TCPClient::setHostAddress(QHostAddress hostAddress)
+{
+    if (m_hostAddress == hostAddress)
+        return;
+
+    m_hostAddress = hostAddress;
+    emit hostAddressChanged(m_hostAddress);
+}
+
+void TCPClient::setPort(quint16 port)
+{
+    if (m_port == port)
+        return;
+
+    m_port = port;
+    emit portChanged(m_port);
 }
 
 void TCPClient::setState(QAbstractSocket::SocketState socketState)

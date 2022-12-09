@@ -6,9 +6,12 @@ DeviceInterface::DeviceInterface(quint16 _radioNumber, QObject *parent) :
 {
     //connect(this, &DeviceInterface::connectToHost, &tcpClient, &TCPClient::connectToHost);
     //connect(&tcpClient, &TCPClient::recievedData, this, &DeviceInterface::onRecievedData);
-    timer = new QTimer();
-    connect(timer, &QTimer::timeout, this, &DeviceInterface::clearBuffer);
-    timer->setSingleShot(true);
+
+    connect(&clearBufferTimer, &QTimer::timeout, this, &DeviceInterface::clearBuffer);
+    clearBufferTimer.setSingleShot(true);
+
+    connect(&queueTimer, &QTimer::timeout, this, &DeviceInterface::checkQueue);
+    queueTimer.start(2000);
 }
 
 /*void DeviceInterface::connectToHost(const QHostAddress &address, quint16 port)
@@ -47,9 +50,11 @@ quint16 DeviceInterface::radioNumber() const
 
 void DeviceInterface::clearBuffer()
 {
-    buffer.clear();
-    qDebug()<<"Buffer Cleared";
-
+    if(buffer.length())
+    {
+        emit eventLog(QString(Tools::jalaliNow()+", Buffer Cleared, len:%1").arg(buffer.length()));
+        buffer.clear();
+    }
 }
 
 quint16 DeviceInterface::bytesToUint16HL(const QByteArray &bytes, int index)
@@ -65,6 +70,8 @@ quint32 DeviceInterface::bytesToUint32HL(const QByteArray &bytes, int index)
     quint32 res= ((quint32)bytesToUint16HL(bytes, index)<<16) + (bytesToUint16HL(bytes, index+2)&0xFFFF);
     return res;
 }
+
+
 bool DeviceInterface::extractPMReadResponse(const QByteArray &data)
 {
     QString log="";
@@ -116,7 +123,7 @@ bool DeviceInterface::extractPoolingResponse(const QByteArray &data)
     StatusInfo statusInfo;
     int rtuNumber=0, k=3;
     rtuNumber = bytesToUint16HL(data, k);k+=2;
-    log=QString(Tools::jalaliNow()+",PoolingResults, RTU:%1\r\n").arg(rtuNumber);
+    log=QString(Tools::jalaliNow()+", PoolingResults, RTU:%1\r\n").arg(rtuNumber);
 
 
     statusInfo.generalStatus= bytesToUint16HL(data, k);k+=2;
@@ -151,6 +158,25 @@ bool DeviceInterface::extractPoolingResponse(const QByteArray &data)
 bool DeviceInterface::extractCommandResponse(const QByteArray &data)
 {
 
+    QString log="";
+    if(data.length()!=8)
+    {
+        log=QString(Tools::jalaliNow()+", Error to extractCommandResponse");
+        emit eventLog(log);
+        return false;
+    }
+    CommandInfo commandInfo;
+    int rtuNumber=0;
+    rtuNumber =  (int)data[0];
+    commandInfo.registerNumber = (int)data[3];
+    commandInfo.value = bytesToUint16HL(data, 5);
+
+    log=QString(Tools::jalaliNow()+", Command Exec Results, RTU:%1\r\n").arg(rtuNumber);
+    log += QString(" RegisterNumber:%1, Value:%2").arg(commandInfo.registerNumber).arg(commandInfo.value);
+
+    emit eventLog(log);
+    emit commnadExecOk(rtuNumber,commandInfo);
+    return true;
 }
 
 
@@ -167,7 +193,7 @@ void DeviceInterface::disconnected()
 
 void DeviceInterface::connected()
 {
-    emit eventLog(QString("%1: Connected to %2:%3").arg(Tools::jalaliNow()).arg(hostAddress().toString()).arg(port()));
+    emit eventLog(QString("%1, Connected to %2:%3").arg(Tools::jalaliNow()).arg(hostAddress().toString()).arg(port()));
 }
 
 void DeviceInterface::recievedData(const QByteArray &data)
@@ -175,6 +201,7 @@ void DeviceInterface::recievedData(const QByteArray &data)
     QString log;
     QTextStream in(&log);
     in<<Tools::jalaliNow()<<", Recieved, Len:"<<data.length()<<", Data:"<<data.toHex(' ').toUpper();
+    emit eventLog(log);
     buffer.append(data);
 
     int len=buffer.length();
@@ -184,7 +211,6 @@ void DeviceInterface::recievedData(const QByteArray &data)
         quint16 calcedCrc = calcCRC(buffer.left(len-2));
         if(crc==calcedCrc)
         {
-            qDebug()<<"OK";
             //emit recievedData(m_radioNumber, buffer);
             switch ((int)buffer[1])
             {
@@ -202,11 +228,11 @@ void DeviceInterface::recievedData(const QByteArray &data)
             buffer.clear();
         }
     }
-    timer->start(2000);
+    clearBufferTimer.start(2000);
     if(buffer.length()>1000)
         buffer.clear();
-    emit eventLog(log);
 }
+
 
 void DeviceInterface::setRadioNumber(quint16 radioNumber)
 {
@@ -217,7 +243,7 @@ void DeviceInterface::setRadioNumber(quint16 radioNumber)
     emit radioNumberChanged(m_radioNumber);
 }
 
-void DeviceInterface::pmRead(quint8 rtuNumber)
+void DeviceInterface::sendPMRead(quint8 rtuNumber)
 {
     QByteArray data;
     data.append(rtuNumber);
@@ -283,4 +309,64 @@ void DeviceInterface::sendCommand(quint16 rtuNumber, quint8 registerNumber, quin
     }
 }
 
+void DeviceInterface::appendToQueue(const DeviceInterface::RequestInfo &requestInfo)
+{
+    if(requestsQueue.count()<100)
+    {
+        requestsQueue.enqueue(requestInfo);
+        QString log;
+        QTextStream in(&log);
+        in<<Tools::jalaliNow()<<", Add to queue, Len is:"<<requestsQueue.count()<<", Request is: "<<Tools::enumToString(requestInfo.requestType) <<", RTU:"<<requestInfo.rtuNumber;
+        eventLog(log);
+    }
+}
 
+void DeviceInterface::requetPMRead(quint8 rtuNumber)
+{
+    RequestInfo requestInfo;
+    requestInfo.requestType = DeviceInterface::PMRead;
+    requestInfo.rtuNumber = rtuNumber;
+    appendToQueue(requestInfo);
+}
+
+void DeviceInterface::requetPooling(quint8 rtuNumber)
+{
+    RequestInfo requestInfo;
+    requestInfo.requestType = DeviceInterface::Pooling;
+    requestInfo.rtuNumber = rtuNumber;
+    appendToQueue(requestInfo);
+}
+
+void DeviceInterface::requetCommand(quint16 rtuNumber, quint8 registerNumber, quint16 registerValue)
+{
+    RequestInfo requestInfo;
+    requestInfo.requestType = DeviceInterface::Command;
+    requestInfo.rtuNumber = rtuNumber;
+    requestInfo.registerNumber = registerNumber;
+    requestInfo.registerValue = registerValue;
+    appendToQueue(requestInfo);
+}
+
+
+void DeviceInterface::checkQueue()
+{
+    if(!requestsQueue.isEmpty() &&  state()==QAbstractSocket::ConnectedState)
+    {
+        RequestInfo requestInfo = requestsQueue.dequeue();
+        switch (requestInfo.requestType)
+        {
+        case DeviceInterface::PMRead:
+            sendPMRead(requestInfo.rtuNumber);
+            break;
+        case DeviceInterface::Pooling:
+            sendPooling(requestInfo.rtuNumber);
+            break;
+        case DeviceInterface::Command:
+            sendCommand(requestInfo.rtuNumber, requestInfo.registerNumber, requestInfo.registerValue);
+            break;
+        default:
+            break;
+        }
+        eventLog(QString("The number of requests remaining in the queue is: %1").arg(requestsQueue.count()));
+    }
+}

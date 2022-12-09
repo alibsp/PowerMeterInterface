@@ -19,23 +19,24 @@ void debugMessageOutput(QtMsgType type, const QMessageLogContext &context, const
     switch ( type )
     {
     case QtDebugMsg:
-        txt += QString("{Debug} \t\t %1").arg(msg);
+        //txt += QString("{Debug} \t\t %1").arg(msg);
+        txt += msg;
         break;
     case QtWarningMsg:
-        txt += QString("{Warning:} \t %1").arg(msg);
+        txt += QString("%1 {Warning:} \t %2").arg(Tools::jalaliNow()).arg(msg);
         break;
     case QtCriticalMsg:
-        txt += QString("{Critical:} \t %1").arg(msg);
+        txt += QString("%1 {Critical:} \t %1").arg(Tools::jalaliNow()).arg(msg);
         break;
     case QtFatalMsg:
-        txt += QString("{Fatal:} \t %1").arg(msg);
+        txt += QString("%1 {Fatal:} \t %1").arg(Tools::jalaliNow()).arg(msg);
         abort(); // deliberately core dump
     }
     QFile outFile("Debug.log");
     outFile.open(QIODevice::WriteOnly | QIODevice::Append);
 
     QTextStream textStream(&outFile);
-    textStream << Tools::jalaliNow()<<" "<< txt << endl;
+    textStream << txt << endl;
 
 }
 
@@ -76,5 +77,6 @@ int main(int argc, char *argv[])
     }*/
     MainWindow w;
     w.show();
+
     return a.exec();
 }
