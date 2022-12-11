@@ -2,14 +2,13 @@
 #define DEVICEINTERFACE_H
 
 #include <QObject>
-#include <QQueue>
 #include "../NetworkLayer/TcpClient.h"
 #include "Tools.h"
 
 struct PowerInfo
 {
 public :
-    QString serialNumber;
+    quint64 serialNumber;
     double tarfeha[4], cosFi, volatge, amper;
     int year, month, day, hour, minute;
 };
@@ -35,6 +34,8 @@ class DeviceInterface : public TCPClient
 {
     Q_OBJECT
     Q_PROPERTY(quint16 radioNumber READ radioNumber WRITE setRadioNumber NOTIFY radioNumberChanged)
+    Q_PROPERTY(bool run READ run WRITE setRun NOTIFY runChanged)
+
 public:
 
     enum RequestType{PMRead, Pooling, Command};
@@ -53,17 +54,19 @@ public:
     explicit DeviceInterface(quint16 _radioNumber=1, QObject *parent = nullptr);
     //void connectToHost(const QHostAddress &address, quint16 port);
 
-    void requetPMRead(quint8 rtuNumber);
+    void requetPMRead(quint8 rtuNumber, bool isImportan=false);
     void requetPooling(quint8 rtuNumber);
     void requetCommand(quint16 rtuNumber, quint8 registerNumber, quint16 registerValue);
 
     quint16 calcCRC(QByteArray data);
     quint16 radioNumber() const;
 
+    bool run() const;
+
 private:
     QTimer clearBufferTimer;
     QTimer queueTimer;
-    QQueue<RequestInfo> requestsQueue;
+    QList<RequestInfo> requestsQueue;
     quint16 m_radioNumber;
     QByteArray buffer;
 
@@ -78,8 +81,13 @@ private:
 
     quint16 bytesToUint16HL(const QByteArray &bytes, int index);
     quint32 bytesToUint32HL(const QByteArray &bytes, int index);
+    quint64 bytesToUint64HL(const QByteArray &bytes, int index);
+
 
     void appendToQueue(const RequestInfo &requestInfo);
+    void addToFirstOFQueue(const DeviceInterface::RequestInfo &requestInfo);
+    bool m_run = true;
+
 private slots:
     void recievedData(const QByteArray &data);
     void checkQueue();
@@ -95,12 +103,15 @@ signals:
     void commnadExecOk(const int &rtuNumber,const CommandInfo &commandInfo);
 
     // TCPClient interface
+    void runChanged(bool run);
+
 public slots:
     void stateChanged(QAbstractSocket::SocketState socketState);
     void disconnected();
     void connected();
 
 
+    void setRun(bool run);
 };
 
 #endif // DEVICEINTERFACE_H

@@ -16,6 +16,9 @@ class DevicesCommunicationService : public QObject
     Q_PROPERTY(bool commandEnable READ commandEnable WRITE setCommandEnable NOTIFY commandEnableChanged)
     Q_PROPERTY(int interval READ interval WRITE setInterval NOTIFY intervalChanged)
 
+    Q_PROPERTY(bool run READ run WRITE setRun NOTIFY runChanged)
+
+
 
 public:
     explicit DevicesCommunicationService(QObject *parent = nullptr);
@@ -28,6 +31,8 @@ public:
     bool commandEnable() const;
 
     int interval() const;
+
+    bool run() const;
 
 public slots:
     void pmResultReady(const int &rtuNumber, const QList<PowerInfo> &powerInfos);
@@ -42,6 +47,8 @@ public slots:
 
     void setInterval(int interval);
 
+    void setRun(bool run);
+
 signals:
     void eventLog(const QString &log);
     void poolingEnableChanged(bool poolingEnable);
@@ -49,6 +56,8 @@ signals:
     void commandEnableChanged(bool commandEnable);
 
     void intervalChanged(int interval);
+
+    void runChanged(bool run);
 
 private:
     QTimer timer;
@@ -70,6 +79,9 @@ private:
 
 
     void radioDeviceLoaded();
+
+    void requestMonitor(int mrId, quint8 rtuNumber);
+    bool m_run=true;
 
 private slots:
 

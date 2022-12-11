@@ -48,6 +48,11 @@ quint16 DeviceInterface::radioNumber() const
     return m_radioNumber;
 }
 
+bool DeviceInterface::run() const
+{
+    return m_run;
+}
+
 void DeviceInterface::clearBuffer()
 {
     if(buffer.length())
@@ -71,6 +76,11 @@ quint32 DeviceInterface::bytesToUint32HL(const QByteArray &bytes, int index)
     return res;
 }
 
+quint64 DeviceInterface::bytesToUint64HL(const QByteArray &bytes, int index)
+{
+    quint64 res= ((quint64)bytesToUint32HL(bytes, index)<<32) + (bytesToUint32HL(bytes, index+4)&0xFFFFFFFF);
+    return res;
+}
 
 bool DeviceInterface::extractPMReadResponse(const QByteArray &data)
 {
@@ -88,8 +98,13 @@ bool DeviceInterface::extractPMReadResponse(const QByteArray &data)
     log=QString(Tools::jalaliNow()+",PMResults, RTU:%1").arg(rtuNumber);
     for (int i=0, k=1;i<160;i+=40, k++)
     {
-        log+=QString(", Kontor:%1").arg(k);
+        log+=QString("\r\nKontor:%1").arg(k);
         PowerInfo  powerInfo;
+        QString ser ="";
+        for (int j=0;j<7;j++)
+            ser += QString("%1").arg((int)data[44+i+j], 2, 10, QLatin1Char('0'));
+        powerInfo.serialNumber = ser.toLongLong();
+        log += QString(", serialNumber:%1").arg(powerInfo.serialNumber);
         for (int j=0;j<4;j++)
         {
             powerInfo.tarfeha[j] = bytesToUint32HL(data, i + j*4 + 51) / 100.0;
@@ -100,9 +115,9 @@ bool DeviceInterface::extractPMReadResponse(const QByteArray &data)
         powerInfo.amper 	= bytesToUint16HL(data, i+71) / 100.0;
         powerInfos.append(powerInfo);
 
-        log += QString(", CosFi:%2").arg(powerInfo.cosFi, 0, 'f', 2);
-        log += QString(", Volatge:%2").arg(powerInfo.volatge, 0, 'f', 2);
-        log += QString(", Amper:%2").arg(powerInfo.amper, 0, 'f', 2);
+        log += QString(", CosFi:%1").arg(powerInfo.cosFi, 0, 'f', 2);
+        log += QString(", Volatge:%1").arg(powerInfo.volatge, 0, 'f', 2);
+        log += QString(", Amper:%1").arg(powerInfo.amper, 0, 'f', 2);
     }
 
     emit eventLog(log);
@@ -167,9 +182,9 @@ bool DeviceInterface::extractCommandResponse(const QByteArray &data)
     }
     CommandInfo commandInfo;
     int rtuNumber=0;
-    rtuNumber =  (int)data[0];
-    commandInfo.registerNumber = (int)data[3];
-    commandInfo.value = bytesToUint16HL(data, 5);
+    rtuNumber =  (quint8)data[0];
+    commandInfo.registerNumber = (quint8)data[3];
+    commandInfo.value = bytesToUint16HL(data, 4);
 
     log=QString(Tools::jalaliNow()+", Command Exec Results, RTU:%1\r\n").arg(rtuNumber);
     log += QString(" RegisterNumber:%1, Value:%2").arg(commandInfo.registerNumber).arg(commandInfo.value);
@@ -194,6 +209,15 @@ void DeviceInterface::disconnected()
 void DeviceInterface::connected()
 {
     emit eventLog(QString("%1, Connected to %2:%3").arg(Tools::jalaliNow()).arg(hostAddress().toString()).arg(port()));
+}
+
+void DeviceInterface::setRun(bool run)
+{
+    if (m_run == run)
+        return;
+
+    m_run = run;
+    emit runChanged(m_run);
 }
 
 void DeviceInterface::recievedData(const QByteArray &data)
@@ -308,25 +332,43 @@ void DeviceInterface::sendCommand(quint16 rtuNumber, quint8 registerNumber, quin
         emit eventLog(log);
     }
 }
-
+//-----------------------------------------------------------------------------
+//          Queue Managment
+//-----------------------------------------------------------------------------
 void DeviceInterface::appendToQueue(const DeviceInterface::RequestInfo &requestInfo)
 {
     if(requestsQueue.count()<100)
     {
-        requestsQueue.enqueue(requestInfo);
+        requestsQueue.append(requestInfo);
         QString log;
         QTextStream in(&log);
-        in<<Tools::jalaliNow()<<", Add to queue, Len is:"<<requestsQueue.count()<<", Request is: "<<Tools::enumToString(requestInfo.requestType) <<", RTU:"<<requestInfo.rtuNumber;
+        in<<Tools::jalaliNow()<<", Add to end of queue, Len is:"<<requestsQueue.count()<<", Request is: "<<Tools::enumToString(requestInfo.requestType) <<", RTU:"<<requestInfo.rtuNumber;
         eventLog(log);
     }
 }
 
-void DeviceInterface::requetPMRead(quint8 rtuNumber)
+void DeviceInterface::addToFirstOFQueue(const DeviceInterface::RequestInfo &requestInfo)
+{
+    if(requestsQueue.count()<100)
+    {
+        requestsQueue.insert(0, requestInfo);
+        QString log;
+        QTextStream in(&log);
+        in<<Tools::jalaliNow()<<", Add to first of queue, Len is:"<<requestsQueue.count()<<", Request is: "<<Tools::enumToString(requestInfo.requestType) <<", RTU:"<<requestInfo.rtuNumber;
+        eventLog(log);
+    }
+}
+
+
+void DeviceInterface::requetPMRead(quint8 rtuNumber, bool isImportan)
 {
     RequestInfo requestInfo;
     requestInfo.requestType = DeviceInterface::PMRead;
     requestInfo.rtuNumber = rtuNumber;
-    appendToQueue(requestInfo);
+    if(isImportan)
+        addToFirstOFQueue(requestInfo);
+    else
+        appendToQueue(requestInfo);
 }
 
 void DeviceInterface::requetPooling(quint8 rtuNumber)
@@ -344,15 +386,15 @@ void DeviceInterface::requetCommand(quint16 rtuNumber, quint8 registerNumber, qu
     requestInfo.rtuNumber = rtuNumber;
     requestInfo.registerNumber = registerNumber;
     requestInfo.registerValue = registerValue;
-    appendToQueue(requestInfo);
+    addToFirstOFQueue(requestInfo);
 }
 
 
 void DeviceInterface::checkQueue()
 {
-    if(!requestsQueue.isEmpty() &&  state()==QAbstractSocket::ConnectedState)
+    if(!requestsQueue.isEmpty() &&  state()==QAbstractSocket::ConnectedState && m_run)
     {
-        RequestInfo requestInfo = requestsQueue.dequeue();
+        RequestInfo requestInfo = requestsQueue.takeFirst();
         switch (requestInfo.requestType)
         {
         case DeviceInterface::PMRead:

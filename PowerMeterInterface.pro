@@ -60,3 +60,6 @@ else: unix:!android: target.path = /opt/$${TARGET}/bin
 
 #win32:!win32-g++: PRE_TARGETDEPS += $$PWD/BSPLib/BSPLib1.lib
 #else:unix|win32-g++: PRE_TARGETDEPS += $$PWD/BSPLib/libBSPLib1.a
+
+RESOURCES += \
+    Images.qrc

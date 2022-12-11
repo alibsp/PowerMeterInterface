@@ -31,5 +31,9 @@ private slots:
     void on_chbPooling_stateChanged(int arg1);
     void on_sldInterval_valueChanged(int value);
 
+    void on_btnPlay_triggered(QAction *arg1);
+    void on_btnClear_triggered(QAction *arg1);
+    void on_btnPlay_clicked();
+    void on_btnClear_clicked();
 };
 #endif // MAINWINDOW_H

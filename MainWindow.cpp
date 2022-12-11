@@ -62,3 +62,32 @@ void MainWindow::on_sldInterval_valueChanged(int value)
 {
     deviceService->setInterval(value);
 }
+
+void MainWindow::on_btnPlay_triggered(QAction *arg1)
+{
+;
+}
+
+void MainWindow::on_btnClear_triggered(QAction *arg1)
+{
+}
+
+void MainWindow::on_btnPlay_clicked()
+{
+    deviceService->setRun(!deviceService->run());
+    if(deviceService->run())
+    {
+        ui->pteLog->appendPlainText("راه اندازی مجدد سرکشی به آرتی یوها");
+        ui->btnPlay->setIcon(QIcon(":/Images/pause.png"));
+    }
+    else
+    {
+        ui->pteLog->appendPlainText("توقف سرکشی به آرتی یوها");
+        ui->btnPlay->setIcon(QIcon(":/Images/start.png"));
+    }
+}
+
+void MainWindow::on_btnClear_clicked()
+{
+    ui->pteLog->clear();
+}

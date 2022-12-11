@@ -57,7 +57,7 @@ void DevicesCommunicationService::loadRadioDeviceInfo()
         QObject::connect (query, &AsyncQuery::execDone, this, [=](const AsyncQueryResult &result)
         {
             if (!result.isValid()) {
-                qDebug() << "SqlError" << result.error().text();
+                eventLog(QString("%1, SqlError: %3").arg(Tools::jalaliNow()).arg(result.error().text()));
             } else {
                 for (int row = 0; row < result.count(); row++)
                 {
@@ -71,6 +71,8 @@ void DevicesCommunicationService::loadRadioDeviceInfo()
                     connect(&deviceInterface, &DeviceInterface::pmResultReady, this, &DevicesCommunicationService::pmResultReady);
                     connect(&deviceInterface, &DeviceInterface::poolingResultReady, this, &DevicesCommunicationService::poolingResultReady);
                     connect(&deviceInterface, &DeviceInterface::commnadExecOk, this, &DevicesCommunicationService::commnadExecOk);
+
+                    connect(this, &DevicesCommunicationService::runChanged, &deviceInterface, &DeviceInterface::setRun);
 
                     deviceInterface.tryConnectToHost(QHostAddress(host), 5000);
 
@@ -106,7 +108,7 @@ void DevicesCommunicationService::loadRTUDevicesInfo()
         QObject::connect (query, &AsyncQuery::execDone, [=](const AsyncQueryResult &result)
         {
             if (!result.isValid()) {
-                qDebug() << "SqlError" << result.error().text();
+                eventLog(QString("%1, SqlError: %3").arg(Tools::jalaliNow()).arg(result.error().text()));
             } else {
                 for (int row = 0; row < result.count(); row++)
                     rtuNumbers.append(result.value(row, "RTUNo").toInt());
@@ -145,11 +147,16 @@ int DevicesCommunicationService::interval() const
     return m_interval;
 }
 
+bool DevicesCommunicationService::run() const
+{
+    return m_run;
+}
+
 
 
 void DevicesCommunicationService::pmReadTick()
 {
-    if(!m_pmReadEnable || rtuNumbers.count()==0)
+    if(!m_pmReadEnable || rtuNumbers.count()==0 || !m_run)
         return;
     for (int i = 0; i < rtuNumbers.length(); ++i)
         deviceInterface.requetPMRead(rtuNumbers[i]);
@@ -159,7 +166,7 @@ void DevicesCommunicationService::pmReadTick()
 
 void DevicesCommunicationService::poolingTick()
 {
-    if(!m_poolingEnable || rtuNumbers.count()==0)
+    if(!m_poolingEnable || rtuNumbers.count()==0 || !m_run)
         return;
     for (int i = 0; i < rtuNumbers.length(); ++i)
         deviceInterface.requetPooling(rtuNumbers[i]);
@@ -167,18 +174,105 @@ void DevicesCommunicationService::poolingTick()
         timerPooling.start(rtuNumbers.length()*2*2000);
 }
 
+void DevicesCommunicationService::requestMonitor(int mrId, quint8 rtuNumber)
+{
+    deviceInterface.requetPMRead(rtuNumber, true);
+    AsyncQuery *query = new AsyncQuery();
+    query->bindValue(":MRId", mrId);
+    query->prepare("UPDATE MonitorRequest set Done=Done+1 WHERE MRId=:MRId");
+    query->startExec();
+
+}
+
 void DevicesCommunicationService::commandsTick()
 {
-    if(!m_commandEnable || rtuNumbers.count()==0)
+    if(!m_commandEnable || rtuNumbers.count()==0 || !m_run)
         return;
     if(commandInterval*m_interval<rtuNumbers.length()*2*2)
         timerCommand.start(rtuNumbers.length()*2*2000);
+    try
+    {
+        AsyncQuery *query = new AsyncQuery();
+        QObject::connect (query, &AsyncQuery::execDone, [=](const AsyncQueryResult &result)
+        {
+            if (!result.isValid()) {
+                eventLog(QString("%1, SqlError: %3").arg(Tools::jalaliNow()).arg(result.error().text()));
+            } else {
+                for (int row = 0; row < result.count(); row++)
+                {
+                    quint16 rtuNumber       = result.value(row, "RTUNo").toInt();
+                    quint8  registerNumber  = result.value(row, "RegisterNumber").toInt();
+                    quint16 registerValue   = result.value(row, "Value").toInt();
+                    deviceInterface.requetCommand(rtuNumber, registerNumber, registerValue);
+                }
+            }
+        });
+        query->startExec("select RTUNo, RegisterNumber, Value  from Command "
+                         " Where Executed=0 "
+                         " and Datediff(MINUTE,CDate,getdate())<=5");
+    } catch (int ab)
+    {
+
+    }
+
+    try
+    {
+        AsyncQuery *query = new AsyncQuery();
+        QObject::connect (query, &AsyncQuery::execDone, [=](const AsyncQueryResult &result)
+        {
+            if (!result.isValid()) {
+                eventLog(QString("%1, SqlError: %3").arg(Tools::jalaliNow()).arg(result.error().text()));
+            } else {
+                for (int row = 0; row < result.count(); row++)
+                {
+                    quint16 mrid            = result.value(row, "MRId").toInt();
+                    quint16 rtuNumber       = result.value(row, "RTUNo").toInt();
+                    requestMonitor(mrid, rtuNumber);
+                }
+            }
+        });
+        query->startExec("select MRId, RTUNo from MonitorRequest "
+                         " Where Executed=0 AND Done<3"
+                         " and Datediff(MINUTE,RTime,getdate())<=5");
+    } catch (int ab)
+    {
+
+    }
 }
 
 
 void DevicesCommunicationService::pmResultReady(const int &rtuNumber, const QList<PowerInfo> &powerInfos)
 {
+    try
+    {
+        for (int i = 0; i < powerInfos.count(); ++i)
+        {
+            AsyncQuery *query = new AsyncQuery();
+            QObject::connect (query, &AsyncQuery::execDone, [=](const AsyncQueryResult &result)
+            {
+                if (!result.isValid())
+                    eventLog(QString("%1, SqlError: %3").arg(Tools::jalaliNow()).arg(result.error().text()));
+                 else
+                    for (int row = 0; row < result.count(); row++)
+                        eventLog(Tools::jalaliNow()+", SP_InsertCounterPower exex result:"+result.value(row, 0).toString());
+            });
+            query->prepare("{CALL dbo.SP_InsertCounterPower (:RTUNo, :Serial_number, :P1, :P2, :P3, :P4, :Cosfi, :Voltage, :Amper)}");
+            query->bindValue(":RTUNo", rtuNumber);
+            query->bindValue(":Serial_number", powerInfos[i].serialNumber);
+            for (int j = 0; j < 4; ++j)
+                query->bindValue(QString(":P%1").arg(j+1), powerInfos[i].tarfeha[j]);
+            query->bindValue(":Cosfi"  , powerInfos[i].cosFi);
+            query->bindValue(":Voltage", powerInfos[i].volatge);
+            query->bindValue(":Amper"  , powerInfos[i].amper);
+            //query->bindValue("@CDate"  , QString("%1/%2/%3").arg(powerInfos[i].year).arg(powerInfos[i].month).arg(powerInfos[i].day));
+            //query->bindValue("@CTime"  , QString("%1:%2").arg(powerInfos[i].hour).arg(powerInfos[i].minute));
+            query->startExec();
+        }
 
+    } catch (int ab)
+    {
+
+    }
 }
 
 void DevicesCommunicationService::poolingResultReady(const int &rtuNumber, const StatusInfo &statusInfo)
@@ -189,6 +283,26 @@ void DevicesCommunicationService::poolingResultReady(const int &rtuNumber, const
 void DevicesCommunicationService::commnadExecOk(const int &rtuNumber, const CommandInfo &commandInfo)
 {
 
+    try
+    {
+        AsyncQuery *query = new AsyncQuery();
+        QObject::connect (query, &AsyncQuery::execDone, [=](const AsyncQueryResult &result)
+        {
+            if (!result.isValid())
+                eventLog(QString("%1, SqlError: %3").arg(Tools::jalaliNow()).arg(result.error().text()));
+             else
+                for (int row = 0; row < result.count(); row++)
+                    eventLog(Tools::jalaliNow()+", SP_UpdateCommand exec ok, result:"+result.value(row, 0).toString());
+        });
+        query->bindValue(":RTUNo", rtuNumber);
+        query->bindValue(":RegisterNumber", commandInfo.registerNumber);
+        query->bindValue(":value", commandInfo.value);
+        query->prepare("{CALL SP_UpdateCommand (:RTUNo, :RegisterNumber, :value)}");
+        query->startExec();
+    } catch (int ab)
+    {
+
+    }
 }
 
 void DevicesCommunicationService::eventLogSlot(const QString &log)
@@ -233,4 +347,13 @@ void DevicesCommunicationService::setInterval(int interval)
     timerPooling.setInterval(poolingInterval * m_interval);
     timerPMRead. setInterval(pmReadInterval   * m_interval);
     timerCommand.setInterval(commandInterval * m_interval);
-     emit intervalChanged(m_interval);}
+    emit intervalChanged(m_interval);}
+
+void DevicesCommunicationService::setRun(bool run)
+{
+    if (m_run == run)
+        return;
+
+    m_run = run;
+    emit runChanged(m_run);
+}
